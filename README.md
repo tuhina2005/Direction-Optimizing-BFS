@@ -1,99 +1,42 @@
-![GAP logo](https://scottbeamer.net/images/gap-logo-horiz.svg)
+# Direction-Optimizing Breadth-First Search
 
-GAP Benchmark Suite [![Build Status](https://github.com/sbeamer/gapbs/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/sbeamer/gapbs/actions/workflows/c-cpp.yml)
-===================
+**Course:** CSD319 - Design and Analysis of Algorithm  
+**Reference Paper:** *Direction-Optimizing Breadth-First Search* by Scott Beamer 
 
-This is the reference implementation for the [GAP](http://gap.cs.berkeley.edu/) [Benchmark Suite](http://gap.cs.berkeley.edu/benchmark.html). It is designed to be a portable high-performance baseline that only requires a compiler with support for C++11. It uses OpenMP for parallelism, but it can be compiled without OpenMP to run serially. The details of the benchmark can be found in the [specification](http://arxiv.org/abs/1508.03619).
+---
 
-The GAP Benchmark Suite is intended to help graph processing research by standardizing evaluations. Fewer differences between graph processing evaluations will make it easier to compare different research efforts and quantify improvements. The benchmark not only specifies graph kernels, input graphs, and evaluation methodologies, but it also provides an optimized baseline implementation (this repo). These baseline implementations are representative of state-of-the-art performance, and thus new contributions should outperform them to demonstrate an improvement.
+## 📌 Project Background
+Graph traversal is a fundamental operation in computing, crucial for shortest path algorithms, social network analysis, and data mining. However, modern real-world graphs (like social networks) are massive and exhibit properties like low diameter and scale-free degree distributions. 
 
-Kernels Included
-----------------
-+ Breadth-First Search (BFS) - direction optimizing
-+ Single-Source Shortest Paths (SSSP) - delta stepping
-+ PageRank (PR) - iterative method in pull direction, Gauss-Seidel & Jacobi
-+ Connected Components (CC) - Afforest & Shiloach-Vishkin
-+ Betweenness Centrality (BC) - Brandes
-+ Triangle Counting (TC) - order invariant with possible degree relabelling
+Conventional parallel BFS algorithms suffer from poor locality, thread contention, and significant redundant work because millions of edges must be simultaneously searched at every frontier expansion. The primary bottleneck is not computation, but memory-bound edge checking. This inefficiency necessitates smarter, direction-aware parallel algorithms.
 
+## ⚙️ Algorithmic Approach
+This repository utilizes a hybrid parallel algorithm that dynamically switches between **top-down** and **bottom-up** traversal based on the frontier size.
 
-Quick Start
------------
+* **Top-Down Search:** Used when the frontier is small. A standard parallel approach where threads explore neighboring nodes.
+* **Bottom-Up Search:** Used when the frontier size becomes large. Each thread processes unvisited nodes to check if any neighbors are in the frontier. This allows for an "early stop" behavior that drastically reduces edge checking and eliminates contention. 
 
-Build the project:
+Two tuning thresholds (`alpha = 14` and `beta = 24`) are used as heuristics to dictate exactly when to switch directions, maintaining algorithmic correctness while achieving significant speedups on real-world graphs.
 
-    $ make
+## 📊 Experimental Implementation & Results
+The algorithm was implemented using C++ with **OpenMP** enabled for multithreading. We executed the BFS program on a supplied graph file and recorded execution time across varying thread counts (1, 2, 4, 8, and 16 threads).
 
-Override the default C++ compiler:
+### Thread Scaling Results
+| Threads | Execution Time (s) | Speedup | Efficiency |
+|---------|--------------------|---------|------------|
+| 1       | 0.00400            | 1.00x   | 100%       |
+| 2       | 0.00300            | 1.33x   | 67%        |
+| 4       | 0.00000            | ∞       | -          |
+| 8       | 0.00000            | ∞       | -          |
+| 16      | 0.00400            | 1.00x   | 6%         |
 
-    $ CXX=g++-13 make
+**Analysis:** Increasing the thread count ultimately reduces efficiency because BFS is inherently a memory-bound and irregular algorithm. As more threads are introduced, memory contention and synchronization overheads increase. By 16 threads, efficiency drops to 6%, demonstrating that beyond a certain limit, adding threads halts progress rather than speeding it up.
 
-Test the build:
+## 🚀 Future Directions
+Based on our analysis, we identified several gaps and areas for future optimization:
+1. **Adaptive Tuning:** Shifting away from fixed parameters to mechanisms that automatically set switching thresholds at runtime based on graph behavior.
+2. **Meta-Hybrid Strategies:** Utilizing pre-execution graph structure analysis to alternate between Direction-Optimizing BFS (for low-diameter graphs) and traditional graph partitioning (for high-diameter graphs).
+3. **Algorithmic Generalization:** Expanding this "push/pull" direction-switching logic to other graph algorithms, such as Betweenness Centrality.
 
-    $ make test
-
-Run BFS on 1,024 vertices for 1 iteration:
-
-    $ ./bfs -g 10 -n 1
-
-Additional command line flags can be found with `-h`
-
-
-Graph Loading
--------------
-
-All of the binaries use the same command-line options for loading graphs:
-+ `-g 20` generates a Kronecker graph with 2^20 vertices (Graph500 specifications)
-+ `-u 20` generates a uniform random graph with 2^20 vertices (degree 16)
-+ `-f graph.el` loads graph from file graph.el
-+ `-sf graph.el` symmetrizes graph loaded from file graph.el
-
-The graph loading infrastructure understands the following formats:
-+ `.el` plain-text edge-list with an edge per line as _node1_ _node2_
-+ `.wel` plain-text weighted edge-list with an edge per line as _node1_ _node2_ _weight_
-+ `.gr` [9th DIMACS Implementation Challenge](http://www.dis.uniroma1.it/challenge9/download.shtml) format
-+ `.graph` Metis format (used in [10th DIMACS Implementation Challenge](http://www.cc.gatech.edu/dimacs10/index.shtml))
-+ `.mtx` [Matrix Market](http://math.nist.gov/MatrixMarket/formats.html) format
-+ `.sg` serialized pre-built graph (use `converter` to make)
-+ `.wsg` weighted serialized pre-built graph (use `converter` to make)
-
-
-Executing the Benchmark
------------------------
-
-We provide a simple makefile-based approach to automate executing the benchmark which includes fetching and building the input graphs. Using these makefiles is not a requirement of the benchmark, but we provide them as a starting point. For example, a user could save disk space by storing the input graphs in fewer formats at the expense of longer loading and conversion times. Anything that complies with the rules in the [specification](http://arxiv.org/abs/1508.03619) is allowed by the benchmark.
-
-__*Warning:*__ A full run of this benchmark can be demanding and should probably not be done on a laptop. Building the input graphs requires about 275 GB of disk space and 64 GB of RAM. Depending on your filesystem and internet bandwidth, building the graphs can take up to 8 hours. Once the input graphs are built, you can delete `gapbs/benchmark/graphs/raw` to free up some disk space. Executing the benchmark itself will require only a few hours.
-
-Build the input graphs:
-    
-    $ make bench-graphs
-
-Execute the benchmark suite:
-
-    $ make bench-run
-
-Spack
------
-The GAP Benchmark Suite is also included in the [Spack](https://spack.io) package manager. To install:
-
-    $ spack install gapbs
-
-
-How to Cite
------------
-
-Please cite this code by the benchmark specification:
-
-> Scott Beamer, Krste Asanović, David Patterson. [*The GAP Benchmark Suite*](http://arxiv.org/abs/1508.03619). arXiv:1508.03619 [cs.DC], 2015.
-
-
-To Learn More
--------------
-The [specification](http://arxiv.org/abs/1508.03619) (above) provides the most detailed description of the benchmark and the reference implementation. The benchmark kernels were selected by a thorough methodology including an extensive literature search [2] and a detailed workload characterization [3]. In 2020, the leading shared-memory graph frameworks competed according to the GAP Benchmark specifications [1].
-
-1. Ariful Azad, Mohsen Mahmoudi Aznaveh, Scott Beamer, et al. [*Evaluation of Graph Analytics Frameworks Using the GAP Benchmark Suite*](https://ieeexplore.ieee.org/document/9251247). International Symposium on Workload Characterization (IISWC), October 2020.
-
-2. Scott Beamer. [*Understanding and Improving Graph Algorithm Performance*](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2016/EECS-2016-153.html). PhD Thesis, University of California Berkeley, September 2016. _SPEC Kaivalya Dixit Distinguished Dissertation Award_.
-
-3. Scott Beamer, Krste Asanović, David Patterson. [*Locality Exists in Graph Processing: Workload Characterization on an Ivy Bridge Server*](https://ieeexplore.ieee.org/document/7314147). International Symposium on Workload Characterization (IISWC), October 2015. _Best Paper Award_.
+---
+*Note: The core C++ reference code in this repository relies on the GAP Benchmark Suite (gapbs) by Scott Beamer. Please refer to the included `daa report.pdf` for our full team analysis.*
